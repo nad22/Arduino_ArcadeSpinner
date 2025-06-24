@@ -28,38 +28,57 @@
 
 static const uint8_t _hidReportDescriptor[] PROGMEM = {
   0x05, 0x01,                       // USAGE_PAGE (Generic Desktop)
-  0x09, 0x04,                       // USAGE (Joystick) (Maybe change to gamepad? I don't think so but...)
+  0x09, 0x05,                       // USAGE (Joystick)
   0xa1, 0x01,                       // COLLECTION (Application)
     0xa1, 0x00,                     // COLLECTION (Physical)
-    
+
       0x05, 0x09,                   // USAGE_PAGE (Button)
       0x19, 0x01,                   // USAGE_MINIMUM (Button 1)
-      0x29, 0x04,                   // USAGE_MAXIMUM (Button 1)
+      0x29, 0x04,                   // USAGE_MAXIMUM (Button 4)
       0x15, 0x00,                   // LOGICAL_MINIMUM (0)
       0x25, 0x01,                   // LOGICAL_MAXIMUM (1)
       0x95, 0x08,                   // REPORT_COUNT (8)
       0x75, 0x01,                   // REPORT_SIZE (1)
       0x81, 0x02,                   // INPUT (Data,Var,Abs)
-    
+
       0x05, 0x01,                   // USAGE_PAGE (Generic Desktop)
 
-      0x09, 0x37,                   // USAGE (Dial)
+      // X Axis
+      0x09, 0x30,                   // USAGE (X)
       0x15, 0x80,                   // LOGICAL_MINIMUM (-128)
       0x25, 0x7F,                   // LOGICAL_MAXIMUM (127)
-      0x95, 0x01,                   // REPORT_COUNT (1)
       0x75, 0x08,                   // REPORT_SIZE (8)
-      0x81, 0x06,                   // INPUT (Data,Var,Rel)
-
-      0x09, 0x38,                   // USAGE (Wheel)
-      0x15, 0x00,                   // LOGICAL_MINIMUM (0)
-      0x26, 0xFF, 0x00,             // LOGICAL_MAXIMUM (255)
       0x95, 0x01,                   // REPORT_COUNT (1)
-      0x75, 0x08,                   // REPORT_SIZE (8)
       0x81, 0x02,                   // INPUT (Data,Var,Abs)
 
-    0xc0,                           // END_COLLECTION
-  0xc0,                             // END_COLLECTION 
+      // Y Axis
+      0x09, 0x31,                   // USAGE (Y)
+      0x15, 0x80,
+      0x25, 0x7F,
+      0x75, 0x08,
+      0x95, 0x01,
+      0x81, 0x02,
+
+      // Spinner
+      0x09, 0x37,                   // USAGE (Dial)
+      0x15, 0x80,
+      0x25, 0x7F,
+      0x95, 0x01,
+      0x75, 0x08,
+      0x81, 0x06,                   // INPUT (Data,Var,Rel)
+
+      // Paddle
+      0x09, 0x38,                   // USAGE (Wheel)
+      0x15, 0x00,
+      0x26, 0xFF, 0x00,
+      0x95, 0x01,
+      0x75, 0x08,
+      0x81, 0x02,
+
+    0xc0,
+  0xc0
 };
+
 
 Gamepad_::Gamepad_(void) : PluggableUSBModule(1, 1, epType), protocol(HID_REPORT_PROTOCOL), idle(1)
 {
@@ -138,8 +157,11 @@ void Gamepad_::reset()
   _GamepadReport.paddle = 0;
   _GamepadReport.spinner = 0;
   _GamepadReport.buttons = 0;
+  _GamepadReport.xAxis = 0;
+  _GamepadReport.yAxis = 0;
   this->send();
 }
+
 
 void Gamepad_::send() 
 {
