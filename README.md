@@ -1,3 +1,13 @@
+This Fork implements the following features: 
+
+- Gamepad Mode: Selectable via Button3. The spinner is mapped to the x-Axis of an analog Gamepad with 4 Buttons and a configurable Deadzone
+- Mouse Mode: Button0 and Butotn1 act als Left/Right Click. Button2/Button3 changes Mouse Sensitivity (Lower/Higher)
+- Mr. Spinner Mode: Button2/Button3 changes Spinner Sensitivity (Lower/Higher)
+
+
+
+
+---------- Original Description from Project Owner
 # Arduino_ArcadeSpinner
 
 This project is a modern re-creation of the spinners used in arcades, mainly for brick-breakers like arkanoid for example.
