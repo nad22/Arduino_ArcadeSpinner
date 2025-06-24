@@ -48,11 +48,15 @@ typedef struct {
     };
     uint8_t buttons;
   };
-  
-  int8_t spinner;
-  int8_t paddle;
+
+  // ACHTUNG: Reihenfolge wie im Descriptor!
+  int8_t xAxis;   // X
+  int8_t yAxis;   // Y
+  int8_t spinner; // Dial (relativ)
+  uint8_t paddle; // Wheel (absolut)
 
 } GamepadReport;
+
 
 
 class Gamepad_ : public PluggableUSBModule
