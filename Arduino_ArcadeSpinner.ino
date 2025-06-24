@@ -33,14 +33,18 @@
 // Spinner/Mouse sensitivity
 // 1 is more sensitive 
 // 999 is less sensitive
-#define SPINNER_SENSITIVITY 15
-#define MOUSE_SENSITIVITY 1
+int spinner_sensitivity = 15;
+int mouse_sensitivity = 5;
+int8_t spinner_axis_value = 0;
+int8_t spinner_axis_value_temp = 0;
+const int deadzone = 15;
+
 
 /////////////////////////////////////////////////////////////////
 
 // Pins used by encoder
-#define pinA 2
-#define pinB 3
+#define pinA 3
+#define pinB 2
 // Pins used by buttons
 #define Button0 5 // Left button
 #define Button1 4 // Right button
@@ -76,6 +80,7 @@ int32_t sp_clamp = SP_MAX/2;
 bool mouse_emu = 0;
 bool paddle_emu = 0;
 bool mr_spinner_emu = 0;
+bool gamepad_emu = 0;
 
 // Interrupt pins of Rotary Encoder
 void drv_proc()
@@ -98,8 +103,8 @@ void drv_proc()
     if(sp_clamp > 0) sp_clamp--;
   }
 
-  drvpos = r_drvpos / SPINNER_SENSITIVITY;
-  m_drvpos = r_drvpos / MOUSE_SENSITIVITY;
+  drvpos = r_drvpos / spinner_sensitivity;
+  m_drvpos = r_drvpos / mouse_sensitivity;
   prev = spval;
 }
 
@@ -141,18 +146,60 @@ void setup()
     mr_spinner_emu = !mr_spinner_emu;
     gp_serial = "MiSTer-S1 Spinner";
   }
-  
+
+  if (!digitalRead(Button3)) {
+    gamepad_emu = !gamepad_emu;
+    gp_serial = "MiSTer-GPad";
+  }
 }
 
 // Main loop
 void loop()
 {
+  // Maus-Sensitivität per Button3 (--) und Button2 (++) anpassen
+  static uint32_t lastSensChange = 0;
+  uint32_t now = millis();
+  if (mouse_emu && now - lastSensChange > 200) {
+    if (!digitalRead(Button3)) { // Jetzt Button3 = empfindlicher
+      if (mouse_sensitivity > 1) {
+        mouse_sensitivity-=10;
+        lastSensChange = now;
+      }
+    }
+    if (!digitalRead(Button2)) { // Jetzt Button2 = weniger empfindlich
+      if (mouse_sensitivity < 100) {
+        mouse_sensitivity+=10;
+        lastSensChange = now;
+      }
+    }
+  }
+  // Spinner-Sensitivität per Button3 (--) und Button2 (++) anpassen im mr-spinner Modus
+  static uint32_t lastSpinnerChange = 0;
+  if (mr_spinner_emu && millis() - lastSpinnerChange > 200) {
+    if (!digitalRead(Button3)) { // Button3 = empfindlicher
+      if (spinner_sensitivity > 1) {
+        spinner_sensitivity-=10;
+        lastSpinnerChange = millis();
+      }
+    }
+    if (!digitalRead(Button2)) { // Button2 = weniger empfindlich
+      if (spinner_sensitivity < 100) {
+        spinner_sensitivity+=10;
+        lastSpinnerChange = millis();
+      }
+    }
+  }
+
+ 
   // Default Spinner/Paddle position;
   rep.paddle = 0;
   rep.spinner = 0;
+  rep.xAxis = 0;
+  rep.yAxis = 0;
+  
   // Buttons
   if (mr_spinner_emu) {
-    rep.b0 = !digitalRead(Button0) || !digitalRead(Button1) || !digitalRead(Button2) || !digitalRead(Button3);
+    rep.b0 = !digitalRead(Button0) || !digitalRead(Button1);
   } else {
     rep.b0 = !digitalRead(Button0);
     rep.b1 = !digitalRead(Button1);
@@ -171,6 +218,8 @@ void loop()
   if(paddle_emu) {
     rep.paddle = ((sp_clamp*255)/SP_MAX);
     rep.spinner = 0;
+    rep.xAxis = 0;
+    rep.yAxis = 0;
   }
 
   // Mouse Emulation
@@ -181,7 +230,62 @@ void loop()
     m_prev += val;
     Mouse.move(val, 0);
     rep.spinner = 0;
+    rep.xAxis = 0;
+    rep.yAxis = 0;
+    
+    // Maus-Buttons
+    if (!digitalRead(Button0)) {
+      Mouse.press(MOUSE_LEFT);
+    } else {
+      Mouse.release(MOUSE_LEFT);
+    }
+
+    if (!digitalRead(Button1)) {
+      Mouse.press(MOUSE_RIGHT);
+    } else {
+      Mouse.release(MOUSE_RIGHT);
+    }
   }
+
+// Gamepad-Emulation (Joystick-Modus)
+ if (gamepad_emu) {
+  rep.b0 = !digitalRead(Button0);
+  rep.b1 = !digitalRead(Button1);
+  rep.b2 = !digitalRead(Button2);
+  rep.b3 = !digitalRead(Button3);
+  rep.spinner = 0;
+  rep.paddle = 0;
+
+  // Spinner → X-Achse
+  static int16_t prev_drvpos = 0;
+  int16_t delta = drvpos - prev_drvpos;
+  prev_drvpos = drvpos;
+
+  if (delta > 0 && spinner_axis_value < 127) {
+    spinner_axis_value += 3;  // langsam steigern
+  } else if (delta < 0 && spinner_axis_value > -127) {
+    spinner_axis_value -= 3;  // langsam senken
+  }
+
+
+  if (spinner_axis_value > -deadzone && spinner_axis_value < deadzone) {
+    spinner_axis_value_temp = 0;
+  }
+  else
+  {
+      spinner_axis_value_temp=spinner_axis_value;
+  }
+
+  rep.xAxis = spinner_axis_value_temp;
+  rep.yAxis = 0;
+
+  if (memcmp(&Gamepad._GamepadReport, &rep, sizeof(GamepadReport))) {
+    Gamepad._GamepadReport = rep;
+    Gamepad.send();
+  }
+  return;
+}
+
 
   // Only report controller state if it has changed
   if (memcmp(&Gamepad._GamepadReport, &rep, sizeof(GamepadReport)))
