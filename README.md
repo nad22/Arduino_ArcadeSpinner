@@ -1,3 +1,12 @@
+--UPDATE: 
+- Added L, R, Select, Start Buttons to Gamepad Mode
+- Added digital HAT to gamepad mode
+- Change Sensitivity of Encoder in all Modes with Select + L/R
+- Gamepad Mode is now the default Mode
+- ------------------------------------
+
+
+
 This Fork implements the following features: 
 
 - Gamepad Mode: Selectable via Button3. The spinner is mapped to the x-Axis of an analog Gamepad with 4 Buttons and a configurable Deadzone
