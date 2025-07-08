@@ -27,56 +27,77 @@
 #include "Gamepad.h"
 
 static const uint8_t _hidReportDescriptor[] PROGMEM = {
-  0x05, 0x01,                       // USAGE_PAGE (Generic Desktop)
-  0x09, 0x05,                       // USAGE (Joystick)
-  0xa1, 0x01,                       // COLLECTION (Application)
-    0xa1, 0x00,                     // COLLECTION (Physical)
+  0x05, 0x01,       // USAGE_PAGE (Generic Desktop)
+  0x09, 0x05,       // USAGE (Game Pad)
+  0xA1, 0x01,       // COLLECTION (Application)
+    0xA1, 0x00,     // COLLECTION (Physical)
 
-      0x05, 0x09,                   // USAGE_PAGE (Button)
-      0x19, 0x01,                   // USAGE_MINIMUM (Button 1)
-      0x29, 0x04,                   // USAGE_MAXIMUM (Button 4)
-      0x15, 0x00,                   // LOGICAL_MINIMUM (0)
-      0x25, 0x01,                   // LOGICAL_MAXIMUM (1)
-      0x95, 0x08,                   // REPORT_COUNT (8)
-      0x75, 0x01,                   // REPORT_SIZE (1)
-      0x81, 0x02,                   // INPUT (Data,Var,Abs)
+      // Buttons 1-12 (12 bits)
+      0x05, 0x09,   // USAGE_PAGE (Button)
+      0x19, 0x01,   // USAGE_MINIMUM (Button 1)
+      0x29, 0x0C,   // USAGE_MAXIMUM (Button 12)
+      0x15, 0x00,   // LOGICAL_MINIMUM (0)
+      0x25, 0x01,   // LOGICAL_MAXIMUM (1)
+      0x75, 0x01,   // REPORT_SIZE (1 bit)
+      0x95, 0x0C,   // REPORT_COUNT (12)
+      0x81, 0x02,   // INPUT (Data,Var,Abs)
 
-      0x05, 0x01,                   // USAGE_PAGE (Generic Desktop)
+      // Padding 4 bits (to fill to 16 bits for buttons field)
+      0x75, 0x04,   // REPORT_SIZE (4 bits)
+      0x95, 0x01,   // REPORT_COUNT (1)
+      0x81, 0x03,   // INPUT (Const,Var,Abs)
+
+      // Hat switch (4 bits)
+      0x05, 0x01,   // USAGE_PAGE (Generic Desktop)
+      0x09, 0x39,   // USAGE (Hat switch)
+      0x15, 0x00,   // LOGICAL_MINIMUM (0)
+      0x25, 0x07,   // LOGICAL_MAXIMUM (7)
+      0x35, 0x00,   // PHYSICAL_MINIMUM (0)
+      0x46, 0x3B, 0x01, // PHYSICAL_MAXIMUM (315)
+      0x65, 0x14,   // UNIT (Eng Rot: Degrees)
+      0x75, 0x04,   // REPORT_SIZE (4 bits)
+      0x95, 0x01,   // REPORT_COUNT (1)
+      0x81, 0x42,   // INPUT (Data,Var,Abs,Null State)
+
+      // Padding 4 bits (to fill 1 byte)
+      0x75, 0x04,   // REPORT_SIZE (4 bits)
+      0x95, 0x01,   // REPORT_COUNT (1)
+      0x81, 0x03,   // INPUT (Const,Var,Abs)
 
       // X Axis
-      0x09, 0x30,                   // USAGE (X)
-      0x15, 0x80,                   // LOGICAL_MINIMUM (-128)
-      0x25, 0x7F,                   // LOGICAL_MAXIMUM (127)
-      0x75, 0x08,                   // REPORT_SIZE (8)
-      0x95, 0x01,                   // REPORT_COUNT (1)
-      0x81, 0x02,                   // INPUT (Data,Var,Abs)
+      0x05, 0x01,
+      0x09, 0x30,
+      0x15, 0x80,
+      0x25, 0x7F,
+      0x75, 0x08,
+      0x95, 0x01,
+      0x81, 0x02,
 
       // Y Axis
-      0x09, 0x31,                   // USAGE (Y)
+      0x09, 0x31,
       0x15, 0x80,
       0x25, 0x7F,
       0x75, 0x08,
       0x95, 0x01,
       0x81, 0x02,
 
-      // Spinner
-      0x09, 0x37,                   // USAGE (Dial)
+      // Spinner (Dial)
+      0x09, 0x37,
       0x15, 0x80,
       0x25, 0x7F,
-      0x95, 0x01,
       0x75, 0x08,
-      0x81, 0x06,                   // INPUT (Data,Var,Rel)
-
-      // Paddle
-      0x09, 0x38,                   // USAGE (Wheel)
-      0x15, 0x00,
-      0x26, 0xFF, 0x00,
       0x95, 0x01,
-      0x75, 0x08,
-      0x81, 0x02,
+      0x81, 0x06,
 
-    0xc0,
-  0xc0
+       0x09, 0x38,                   // USAGE (Wheel)
+      0x15, 0x00,                   // LOGICAL_MINIMUM (0)
+      0x26, 0xFF, 0x00,             // LOGICAL_MAXIMUM (255)
+      0x95, 0x01,                   // REPORT_COUNT (1)
+      0x75, 0x08,                   // REPORT_SIZE (8)
+      0x81, 0x02,                   // INPUT (Data,Var,Abs)
+
+    0xC0,           // END_COLLECTION
+  0xC0              // END_COLLECTION
 };
 
 
