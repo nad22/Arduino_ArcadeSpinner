@@ -2,105 +2,115 @@
  *  Arduino USB Arcade Spinner
  *  (C) Wilfried JEANNIARD [https://github.com/willoucom]
  *  
- *  Based on project by Alexey Melnikov [https://github.com/MiSTer-devel/Retro-Controllers-USB-MiSTer/blob/master/PaddleTwoControllersUSB/PaddleTwoControllersUSB.ino]
- *  Based on project by Mikael Norrgård <mick@daemonbite.com>
+ *  Based on projects by:
+ *    - Alexey Melnikov [https://github.com/MiSTer-devel/Retro-Controllers-USB-MiSTer/blob/master/PaddleTwoControllersUSB/PaddleTwoControllersUSB.ino]
+ *    - Mikael Norrgård <mick@daemonbite.com>
  *  
- *  GNU GENERAL PUBLIC LICENSE
- *  Version 3, 29 June 2007
- *  
- *  This program is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *  
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *  
- *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *  
+ *  License: GNU GENERAL PUBLIC LICENSE v3.0
+ *  https://www.gnu.org/licenses/
  */
 
-///////////////// Customizable settings /////////////////////////
-// For debug (check serial monitor)
-// #define DEBUG
+/////////////////////// Configurable Settings ///////////////////////
 
-// Spinner pulses per revolution
-#define SPINNER_PPR 600
+#define DEBUG                      // Enable serial debug output
 
-// Spinner/Mouse sensitivity
-// 1 is more sensitive 
-// 999 is less sensitive
+#define SPINNER_PPR 600            // Spinner pulses per revolution
+
 int spinner_sensitivity = 15;
 int mouse_sensitivity = 5;
+int wheel_sensitivity = 3;
+float paddle_sensitivity = 2.0f;
+
 int8_t spinner_axis_value = 0;
 int8_t spinner_axis_value_temp = 0;
-const int deadzone = 15;
 
+const int deadzone = 15;           // Deadzone for analog X-axis
 
-/////////////////////////////////////////////////////////////////
+// Flags to track sensitivity changes
+bool wheelSensChangedInc = false;
+bool wheelSensChangedDec = false;
+bool mouseSensChangedInc = false;
+bool mouseSensChangedDec = false;
+bool paddleSensChangedInc = false;
+bool paddleSensChangedDec = false;
 
-// Pins used by encoder
+/////////////////////////////////////////////////////////////////////
+
+/////////////////////// Pin Definitions /////////////////////////////
+
+// Rotary Encoder
 #define pinA 3
 #define pinB 2
-// Pins used by buttons
-#define Button0 5 // Left button
-#define Button1 4 // Right button
-#define Button2 15 // Small Left: Select/Coin
-#define Button3 14 // Small Right: Start
 
-////////////////////////////////////////////////////////
+// Action Buttons
+#define Button0      5
+#define Button1      4
+#define Button2     15
+#define Button3     14
+#define ButtonL     10
+#define ButtonR     16
+#define ButtonStart A0
+#define ButtonSelect A1
 
-// ID for special support in MiSTer 
-// ATT: 20 chars max (including NULL at the end) according to Arduino source code.
-// Additionally serial number is used to differentiate arduino projects to have different button maps!
-const char *gp_serial = "MiSTer-A1 Spinner";
+// OLED I2C pins
+#define OledSCK A2
+#define OledSDA A3
+
+// D-Pad Buttons
+#define ButtonUp     6
+#define ButtonDown   7
+#define ButtonLeft   8
+#define ButtonRight  9
+
+/////////////////////////////////////////////////////////////////////
+
+const char *gp_serial = "MiSTer-GPad";   // USB identifier (max 20 chars)
+
+String modeStr = "";
 
 #include <Mouse.h>
 #include "Gamepad.h"
+#include <U8g2lib.h>
 
-// Create Gamepad
+// OLED display instance
+U8G2_SH1106_128X64_NONAME_F_SW_I2C oled(U8G2_R0, OledSCK, OledSDA, U8X8_PIN_NONE);
+
+// Gamepad and report objects
 Gamepad_ Gamepad;
 GamepadReport rep;
 
-// Default virtual spinner position
+// Spinner & Paddle tracking
 int16_t drvpos = 0;
-// Default real spinner position
 int16_t r_drvpos = 0;
-// Default virtual mouse position
 int16_t m_drvpos = 0;
 
-// Variables for paddle_emu
-#define SP_MAX ((SPINNER_PPR*4*270UL)/360)
-int32_t sp_clamp = SP_MAX/2;
+#define SP_MAX ((SPINNER_PPR * 4 * 270UL) / 360)
+int32_t sp_clamp = SP_MAX / 2;
 
-// For emulation
+// Mode Flags
 bool mouse_emu = 0;
 bool paddle_emu = 0;
 bool mr_spinner_emu = 0;
-bool gamepad_emu = 0;
+bool gamepad_emu = 1;
 
-// Interrupt pins of Rotary Encoder
-void drv_proc()
-{
+/////////////////////////////////////////////////////////////////////
+// Rotary encoder interrupt handler
+/////////////////////////////////////////////////////////////////////
+
+void drv_proc() {
   static int8_t prev = drvpos;
   int8_t a = digitalRead(pinA);
   int8_t b = digitalRead(pinB);
 
-  int8_t spval = (b << 1) | (b^a);
-  int8_t diff = (prev - spval)&3;
+  int8_t spval = (b << 1) | (b ^ a);
+  int8_t diff = (prev - spval) & 3;
 
-  if(diff == 1) 
-  {
+  if (diff == 1) {
     r_drvpos += 1;
-    if(sp_clamp < SP_MAX) sp_clamp++;
-  }
-  if(diff == 3) 
-  {
+    if (sp_clamp < SP_MAX) sp_clamp++;
+  } else if (diff == 3) {
     r_drvpos -= 1;
-    if(sp_clamp > 0) sp_clamp--;
+    if (sp_clamp > 0) sp_clamp--;
   }
 
   drvpos = r_drvpos / spinner_sensitivity;
@@ -108,203 +118,180 @@ void drv_proc()
   prev = spval;
 }
 
-// Run at startup
-void setup()
-{
+/////////////////////////////////////////////////////////////////////
+// Setup function (runs once on startup)
+/////////////////////////////////////////////////////////////////////
+
+void setup() {
   #ifdef DEBUG
     Serial.begin(9600);
   #endif
-  Gamepad.reset();
 
-  // Encoder
+  Gamepad.reset();
+  modeStr = "Joystick / Wheel";
+
+  // Encoder pin setup
   pinMode(pinA, INPUT_PULLUP);
   pinMode(pinB, INPUT_PULLUP);
-  // Init encoder reading
-  drv_proc();
-  // Attach interrupt to each pin of the encoder
+  drv_proc();  // Init encoder values
+
+  // Attach encoder interrupts
   attachInterrupt(digitalPinToInterrupt(pinA), drv_proc, CHANGE);
   attachInterrupt(digitalPinToInterrupt(pinB), drv_proc, CHANGE);
 
-  // Initialize Button Pins
+  // Button inputs
   pinMode(Button0, INPUT_PULLUP);
   pinMode(Button1, INPUT_PULLUP);
   pinMode(Button2, INPUT_PULLUP);
   pinMode(Button3, INPUT_PULLUP);
+  pinMode(ButtonUp, INPUT_PULLUP);
+  pinMode(ButtonDown, INPUT_PULLUP);
+  pinMode(ButtonLeft, INPUT_PULLUP);
+  pinMode(ButtonRight, INPUT_PULLUP);
+  pinMode(ButtonL, INPUT_PULLUP);
+  pinMode(ButtonR, INPUT_PULLUP);
+  pinMode(ButtonStart, INPUT_PULLUP);
+  pinMode(ButtonSelect, INPUT_PULLUP);
 
-  // Enable mouse emulation
+  // Determine initial mode based on held buttons
   if (!digitalRead(Button0)) {
     mouse_emu = !mouse_emu;
+    gamepad_emu = !gamepad_emu;
     Mouse.begin();
+    modeStr = "Mouse Mode";
   } 
-  // Enable paddle emulation
   if (!digitalRead(Button1)) {
     paddle_emu = !paddle_emu;
+    gamepad_emu = !gamepad_emu;
+    modeStr = "Paddle Mode";
   }
-  // Spinner only (AKA mr.Spinner mode)
   if (!digitalRead(Button2)) {
-    // Announce the device as mr.Spinner (more explanations in the readme file)
     mr_spinner_emu = !mr_spinner_emu;
+    gamepad_emu = !gamepad_emu;
     gp_serial = "MiSTer-S1 Spinner";
+    modeStr = "Mr. Spinner Mode";
   }
-
   if (!digitalRead(Button3)) {
     gamepad_emu = !gamepad_emu;
-    gp_serial = "MiSTer-GPad";
+    gp_serial = "MiSTer-A1 Spinner";
   }
+
+  // OLED initialization
+  oled.begin();
+  oled.setBusClock(100000);  // Set I2C to 100 kHz
+  oled.clearBuffer();
+  drawDisplay();
 }
+/////////////////////////////////////////////////////////////////////
+// Main loop (runs continuously)
+/////////////////////////////////////////////////////////////////////
 
-// Main loop
-void loop()
-{
-  // Maus-Sensitivität per Button3 (--) und Button2 (++) anpassen
-  static uint32_t lastSensChange = 0;
-  uint32_t now = millis();
-  if (mouse_emu && now - lastSensChange > 200) {
-    if (!digitalRead(Button3)) { // Jetzt Button3 = empfindlicher
-      if (mouse_sensitivity > 1) {
-        mouse_sensitivity-=10;
-        lastSensChange = now;
-      }
-    }
-    if (!digitalRead(Button2)) { // Jetzt Button2 = weniger empfindlich
-      if (mouse_sensitivity < 100) {
-        mouse_sensitivity+=10;
-        lastSensChange = now;
-      }
-    }
-  }
-  // Spinner-Sensitivität per Button3 (--) und Button2 (++) anpassen im mr-spinner Modus
-  static uint32_t lastSpinnerChange = 0;
-  if (mr_spinner_emu && millis() - lastSpinnerChange > 200) {
-    if (!digitalRead(Button3)) { // Button3 = empfindlicher
-      if (spinner_sensitivity > 1) {
-        spinner_sensitivity-=10;
-        lastSpinnerChange = millis();
-      }
-    }
-    if (!digitalRead(Button2)) { // Button2 = weniger empfindlich
-      if (spinner_sensitivity < 100) {
-        spinner_sensitivity+=10;
-        lastSpinnerChange = millis();
-      }
-    }
+void loop() {
+  // Spinner value smoothing
+  spinner_axis_value_temp = constrain(drvpos, -127, 127);
+
+  // Display update
+  drawDisplay();
+
+  // Read analog paddle input
+  int analogX = analogRead(A3);
+  analogX = map(analogX, 0, 1023, 0, 255);
+
+  // Deadzone adjustment
+  if (abs(analogX - 127) <= deadzone) {
+    analogX = 127;
   }
 
- 
-  // Default Spinner/Paddle position;
-  rep.paddle = 0;
-  rep.spinner = 0;
-  rep.xAxis = 0;
-  rep.yAxis = 0;
-  
-  // Buttons
+  // Handle paddle emulation mode
+  if (paddle_emu) {
+    analogX = analogRead(A3);
+    analogX = map(analogX, 0, 1023, 0, 255);
+    Gamepad.write(analogX, 127, 0, 0, 0, 0, 0);
+    delay(5);
+    return;
+  }
+
+  // Handle mouse emulation mode
+  if (mouse_emu) {
+    Mouse.move(m_drvpos, 0, 0);
+    m_drvpos = 0;
+    delay(5);
+    return;
+  }
+
+  // Handle Mr. Spinner mode
   if (mr_spinner_emu) {
-    rep.b0 = !digitalRead(Button0) || !digitalRead(Button1);
-  } else {
-    rep.b0 = !digitalRead(Button0);
-    rep.b1 = !digitalRead(Button1);
-    rep.b2 = !digitalRead(Button2);
-    rep.b3 = !digitalRead(Button3);
-    }
-
-  // spinner rotation
-  static uint16_t prev = 0;
-  int16_t val = ((int16_t)(drvpos - prev));
-  if(val>127) val = 127; else if(val<-127) val = -127;
-  rep.spinner = val;
-  prev += val;
-
-  // Paddle Emulation
-  if(paddle_emu) {
-    rep.paddle = ((sp_clamp*255)/SP_MAX);
-    rep.spinner = 0;
-    rep.xAxis = 0;
-    rep.yAxis = 0;
+    spinner_axis_value = (int8_t)constrain(spinner_axis_value_temp, -127, 127);
+    Gamepad.write(127, 127, spinner_axis_value, 0, 0, 0, 0);
+    delay(5);
+    return;
   }
 
-  // Mouse Emulation
-  if(mouse_emu) {
-    static uint16_t m_prev = 0;
-    int16_t val = ((int16_t)(m_drvpos - m_prev));
-    if(val>127) val = 127; else if(val<-127) val = -127;
-    m_prev += val;
-    Mouse.move(val, 0);
-    rep.spinner = 0;
-    rep.xAxis = 0;
-    rep.yAxis = 0;
-    
-    // Maus-Buttons
-    if (!digitalRead(Button0)) {
-      Mouse.press(MOUSE_LEFT);
-    } else {
-      Mouse.release(MOUSE_LEFT);
-    }
+  // Default Gamepad (Joystick/Wheel) mode
+  spinner_axis_value = (int8_t)constrain(spinner_axis_value_temp, -127, 127);
+  Gamepad.write(
+    127,                           // X
+    127,                           // Y
+    0,                             // Z
+    spinner_axis_value,           // Rx (spinner)
+    0,                             // Ry
+    0,                             // Rz
+    0                              // Slider
+  );
 
-    if (!digitalRead(Button1)) {
-      Mouse.press(MOUSE_RIGHT);
-    } else {
-      Mouse.release(MOUSE_RIGHT);
-    }
-  }
+  // Read and report button states
+  rep.btn = 0;
+  rep.btn |= !digitalRead(Button0)    << 0;
+  rep.btn |= !digitalRead(Button1)    << 1;
+  rep.btn |= !digitalRead(Button2)    << 2;
+  rep.btn |= !digitalRead(Button3)    << 3;
+  rep.btn |= !digitalRead(ButtonL)    << 4;
+  rep.btn |= !digitalRead(ButtonR)    << 5;
+  rep.btn |= !digitalRead(ButtonStart)<< 6;
+  rep.btn |= !digitalRead(ButtonSelect)<<7;
 
-// Gamepad-Emulation (Joystick-Modus)
- if (gamepad_emu) {
-  rep.b0 = !digitalRead(Button0);
-  rep.b1 = !digitalRead(Button1);
-  rep.b2 = !digitalRead(Button2);
-  rep.b3 = !digitalRead(Button3);
-  rep.spinner = 0;
-  rep.paddle = 0;
+  rep.hat = HAT_CENTERED;
+  if (!digitalRead(ButtonUp))    rep.hat = HAT_UP;
+  if (!digitalRead(ButtonDown))  rep.hat = HAT_DOWN;
+  if (!digitalRead(ButtonLeft))  rep.hat = HAT_LEFT;
+  if (!digitalRead(ButtonRight)) rep.hat = HAT_RIGHT;
 
-  // Spinner → X-Achse
-  static int16_t prev_drvpos = 0;
-  int16_t delta = drvpos - prev_drvpos;
-  prev_drvpos = drvpos;
-
-  if (delta > 0 && spinner_axis_value < 127) {
-    spinner_axis_value += 3;  // langsam steigern
-  } else if (delta < 0 && spinner_axis_value > -127) {
-    spinner_axis_value -= 3;  // langsam senken
-  }
-
-
-  if (spinner_axis_value > -deadzone && spinner_axis_value < deadzone) {
-    spinner_axis_value_temp = 0;
-  }
-  else
-  {
-      spinner_axis_value_temp=spinner_axis_value;
-  }
-
-  rep.xAxis = spinner_axis_value_temp;
-  rep.yAxis = 0;
-
-  if (memcmp(&Gamepad._GamepadReport, &rep, sizeof(GamepadReport))) {
-    Gamepad._GamepadReport = rep;
-    Gamepad.send();
-  }
-  return;
+  Gamepad.write(&rep);
+  delay(5);
 }
 
+/////////////////////////////////////////////////////////////////////
+// Display output function
+/////////////////////////////////////////////////////////////////////
 
-  // Only report controller state if it has changed
-  if (memcmp(&Gamepad._GamepadReport, &rep, sizeof(GamepadReport)))
-  {
-    #ifdef DEBUG
-      // Very verbose debug
-      Serial.print(gp_serial); Serial.print(" ");
-      Serial.print(drvpos); Serial.print(" ");
-      Serial.print(mouse_emu); Serial.print(" ");
-      Serial.print(paddle_emu); Serial.print(" ");
-      Serial.print(rep.spinner); Serial.print(" ");
-      Serial.print(rep.paddle); Serial.print(" ");
-      Serial.print(rep.b0); Serial.print(" ");
-      Serial.print(rep.b1); Serial.print(" ");
-      Serial.print(rep.b2); Serial.print(" ");
-      Serial.println(rep.b3);
-    #endif
-    // Send Gamepad changes
-    Gamepad._GamepadReport = rep;
-    Gamepad.send();
+void drawDisplay() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x7_tf);
+  oled.setCursor(0, 10);
+
+  oled.print("Mode: ");
+  oled.println(modeStr);
+
+  oled.print("Sensitivity: ");
+  if (mouse_emu) {
+    oled.print(mouse_sensitivity);
+  } else if (paddle_emu) {
+    oled.print(paddle_sensitivity);
+  } else {
+    oled.print(spinner_sensitivity);
   }
+
+  oled.setCursor(0, 30);
+  oled.print("Raw Encoder: ");
+  oled.println(r_drvpos);
+
+  oled.setCursor(0, 40);
+  oled.print("Smoothed: ");
+  oled.println(spinner_axis_value);
+
+  oled.setCursor(0, 50);
+  oled.print("Analog X: ");
+  oled.println(analogRead(A3));
+
+  oled.sendBuffer();  // Display everything
 }
