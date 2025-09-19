@@ -1,9 +1,32 @@
 /*  
- *  Arduino USB Arcade Spinner
- *  (C) Wilfried JEANNIARD [https://github.com/willoucom]
+ *  Arduino USB Arcade Spinner - Enhanced Fork
+ *  (C) pukepals.com - This is a fork of the original project
  *  
+ *  Original project by Wilfried JEANNIARD [https://github.com/willoucom]
  *  Based on project by Alexey Melnikov [https://github.com/MiSTer-devel/Retro-Controllers-USB-MiSTer/blob/master/PaddleTwoControllersUSB/PaddleTwoControllersUSB.ino]
  *  Based on project by Mikael Norrgård <mick@daemonbite.com>
+ *  
+ *  DESCRIPTION:
+ *  This project implements a USB arcade spinner controller using an Arduino Leonardo.
+ *  It supports multiple operation modes including gamepad, mouse, paddle, and dedicated
+ *  spinner modes. The device features an OLED display for mode selection and real-time
+ *  sensitivity adjustment, making it perfect for retro gaming and arcade emulation.
+ *  
+ *  HARDWARE REQUIREMENTS:
+ *  - Arduino Leonardo (or compatible board with USB HID support)
+ *  - Rotary encoder (600 PPR recommended for best performance)
+ *  - 8-12 buttons for arcade controls
+ *  - SH1106 128x64 OLED display (I2C)
+ *  - Pull-up resistors for buttons (if not using internal pull-ups)
+ *  
+ *  FEATURES:
+ *  - Gamepad Mode: Standard USB gamepad with analog stick and 8 buttons
+ *  - Mouse Mode: Mouse emulation with left/right click support
+ *  - Paddle Mode: Analog paddle controller for Arkanoid-style games
+ *  - Mr. Spinner Mode: Specialized mode for MiSTer FPGA compatibility
+ *  - Real-time sensitivity adjustment via button combinations
+ *  - OLED display showing current mode and settings
+ *  - Configurable deadzone for analog inputs
  *  
  *  GNU GENERAL PUBLIC LICENSE
  *  Version 3, 29 June 2007
@@ -23,142 +46,181 @@
  *  
  */
 
-///////////////// Customizable settings /////////////////////////
-// For debug (check serial monitor)
- #define DEBUG
+///////////////// CUSTOMIZABLE SETTINGS /////////////////////////
 
-// Spinner pulses per revolution
-#define SPINNER_PPR 600
+// Enable debug output to serial monitor for troubleshooting
+// Comment out to disable debug messages for production use
+#define DEBUG
 
-int spinner_sensitivity = 15;
-int mouse_sensitivity = 5;
-int wheel_sensitivity = 3;
-float paddle_sensitivity = 1.5f;  // Startwert
-int8_t spinner_axis_value = 0;
-int8_t spinner_axis_value_temp = 0;
-const int deadzone = 15;
+// Rotary encoder specifications
+#define SPINNER_PPR 600  // Pulses Per Revolution of the rotary encoder
 
-bool wheelSensChangedInc = false;  // für SELECT + R erhöhen
-bool wheelSensChangedDec = false;  // für SELECT + L verringern
-bool mouseSensChangedInc = false;  // für SELECT + R erhöhen
-bool mouseSensChangedDec = false;  // für SELECT + L verringern
-bool paddleSensChangedInc = false;  // für SELECT + R erhöhen
-bool paddleSensChangedDec = false;  // für SELECT + L verringern
+// Sensitivity settings for different operation modes
+// Higher values = less sensitive (more encoder movement required)
+// Lower values = more sensitive (less encoder movement required)
+int spinner_sensitivity = 15;    // Sensitivity for Mr. Spinner mode (1-100)
+int mouse_sensitivity = 5;       // Sensitivity for mouse movement (1-100)
+int wheel_sensitivity = 3;       // Sensitivity for gamepad wheel mode (1-10)
+float paddle_sensitivity = 1.5f; // Sensitivity for paddle mode (1.0-5.0)
+
+// Analog input processing variables
+int8_t spinner_axis_value = 0;      // Current analog axis value
+int8_t spinner_axis_value_temp = 0; // Temporary value for deadzone processing
+const int deadzone = 15;            // Deadzone threshold to prevent jitter (0-50)
+
+// Sensitivity adjustment state tracking
+// These prevent multiple rapid changes when holding button combinations
+bool wheelSensChangedInc = false;   // SELECT + R button combination state
+bool wheelSensChangedDec = false;   // SELECT + L button combination state  
+bool mouseSensChangedInc = false;   // Mouse sensitivity increase state
+bool mouseSensChangedDec = false;   // Mouse sensitivity decrease state
+bool paddleSensChangedInc = false;  // Paddle sensitivity increase state
+bool paddleSensChangedDec = false;  // Paddle sensitivity decrease state
 
 
 
 /////////////////////////////////////////////////////////////////
 
-// Pins used by encoder
-#define pinA 3
-#define pinB 2
-// Pins used by buttons
-#define Button0 5 //Button 0
-#define Button1 4 //Button 1
-#define Button2 15 //Button 2
-#define Button3 14 //Button 3
-#define ButtonL 10 //Button L
-#define ButtonR 16 //Button R
-#define ButtonStart A0 //Button START
-#define ButtonSelect A1 //Button SELECT
-#define OledSCK A2
-#define OledSDA A3
-#define ButtonUp 6 // DPAD UP
-#define ButtonDown 7 // DPAD DOWN
-#define ButtonLeft 8 // DPAD LEFT
-#define ButtonRight 9 // DPAD RIGHT
+///////////////// HARDWARE PIN ASSIGNMENTS ////////////////////
 
-////////////////////////////////////////////////////////
+// Rotary encoder pins (must support interrupts on Leonardo)
+#define pinA 3              // Encoder channel A (interrupt pin)
+#define pinB 2              // Encoder channel B (interrupt pin)
 
-// ID for special support in MiSTer 
-// ATT: 20 chars max (including NULL at the end) according to Arduino source code.
-// Additionally serial number is used to differentiate arduino projects to have different button maps!
+// Main arcade buttons
+#define Button0 5           // Primary button (left/button 1)
+#define Button1 4           // Secondary button (right/button 2) 
+#define Button2 15          // Auxiliary button 3
+#define Button3 14          // Auxiliary button 4
+
+// Shoulder/trigger buttons
+#define ButtonL 10          // Left shoulder button
+#define ButtonR 16          // Right shoulder button
+
+// System control buttons
+#define ButtonStart A0      // Start button
+#define ButtonSelect A1     // Select button
+
+// OLED display I2C pins (SH1106 128x64)
+#define OledSCK A2          // I2C clock line (SCL)
+#define OledSDA A3          // I2C data line (SDA)
+
+// D-Pad (directional pad) buttons
+#define ButtonUp 6          // D-Pad up direction
+#define ButtonDown 7        // D-Pad down direction  
+#define ButtonLeft 8        // D-Pad left direction
+#define ButtonRight 9       // D-Pad right direction
+
+/////////////////////////////////////////////////////////////////
+
+///////////////// DEVICE IDENTIFICATION & GLOBAL VARIABLES ///////////////////
+
+// Device serial identifier for MiSTer FPGA compatibility
+// Maximum 20 characters including NULL terminator
+// Used to differentiate Arduino projects for different button mappings
 const char *gp_serial = "MiSTer-GPad";
 
-String modeStr="";
+// Current operation mode display string
+String modeStr = "";
 
+// Required libraries
+#include <Mouse.h>      // Arduino Mouse library for mouse emulation
+#include "Gamepad.h"    // Custom gamepad library for USB HID
+#include <U8g2lib.h>    // U8g2 library for OLED display control
 
-#include <Mouse.h>
-#include "Gamepad.h"
-#include <U8g2lib.h>
-//#include <SoftwareWire.h>
+// Function declarations
+void drawDisplay();     // Display current mode and settings on OLED
 
-
-// I2C-Verbindung über SoftwareWire
-//SoftwareWire myWire(OledSDA, OledSCK); // SDA, SCL
-
-// OLED-Objekt (verwende dein Display-Modell)
+// OLED display object (SH1106 128x64 with software I2C)
 U8G2_SH1106_128X64_NONAME_F_SW_I2C oled(U8G2_R0, OledSCK, OledSDA, U8X8_PIN_NONE);
 
+// USB Gamepad object and report structure
+Gamepad_ Gamepad;       // Main gamepad interface
+GamepadReport rep;      // Current gamepad state report
 
-// Create Gamepad
-Gamepad_ Gamepad;
-GamepadReport rep;
+// Spinner position tracking variables
+int16_t drvpos = 0;     // Virtual spinner position for gamepad/paddle modes
+int16_t r_drvpos = 0;   // Raw spinner position from encoder
+int16_t m_drvpos = 0;   // Mouse-specific position tracking
 
-// Default virtual spinner position
-int16_t drvpos = 0;
-// Default real spinner position
-int16_t r_drvpos = 0;
-// Default virtual mouse position
-int16_t m_drvpos = 0;
+// Paddle emulation constants and variables
+#define SP_MAX ((SPINNER_PPR*4*270UL)/360)  // Maximum paddle range (270 degrees)
+int32_t sp_clamp = SP_MAX/2;                // Current paddle position (clamped)
 
-// Variables for paddle_emu
-#define SP_MAX ((SPINNER_PPR*4*270UL)/360)
-int32_t sp_clamp = SP_MAX/2;
+// Operation mode flags (only one should be true at a time)
+bool mouse_emu = 0;      // Mouse emulation mode
+bool paddle_emu = 0;     // Paddle emulation mode  
+bool mr_spinner_emu = 0; // Mr. Spinner mode (MiSTer specific)
+bool gamepad_emu = 1;    // Gamepad mode (default)
 
-// For emulation
-bool mouse_emu = 0;
-bool paddle_emu = 0;
-bool mr_spinner_emu = 0;
-bool gamepad_emu = 1;
+///////////////// ROTARY ENCODER INTERRUPT HANDLER ///////////////////
 
-
-// Interrupt pins of Rotary Encoder
+/**
+ * Rotary encoder interrupt service routine
+ * This function is called whenever the encoder pins change state
+ * It tracks rotation direction and updates position counters
+ * Uses quadrature decoding to determine rotation direction
+ */
 void drv_proc()
 {
   static int8_t prev = drvpos;
-  int8_t a = digitalRead(pinA);
-  int8_t b = digitalRead(pinB);
+  int8_t a = digitalRead(pinA);  // Read encoder channel A
+  int8_t b = digitalRead(pinB);  // Read encoder channel B
 
+  // Quadrature decoding: combine channels A and B into a state value
   int8_t spval = (b << 1) | (b^a);
-  int8_t diff = (prev - spval)&3;
+  int8_t diff = (prev - spval) & 3;
 
+  // Determine rotation direction and update counters
   if(diff == 1) 
   {
-    r_drvpos += 1;
-    if(sp_clamp < SP_MAX) sp_clamp++;
+    r_drvpos += 1;                          // Clockwise rotation
+    if(sp_clamp < SP_MAX) sp_clamp++;       // Update paddle position (clamped)
   }
   if(diff == 3) 
   {
-    r_drvpos -= 1;
-    if(sp_clamp > 0) sp_clamp--;
+    r_drvpos -= 1;                          // Counter-clockwise rotation
+    if(sp_clamp > 0) sp_clamp--;            // Update paddle position (clamped)
   }
 
-  drvpos = r_drvpos / spinner_sensitivity;
-  m_drvpos = r_drvpos / mouse_sensitivity;
-  prev = spval;
+  // Apply sensitivity scaling for different modes
+  drvpos = r_drvpos / spinner_sensitivity;   // Gamepad/paddle mode position
+  m_drvpos = r_drvpos / mouse_sensitivity;   // Mouse mode position
+  prev = spval;                              // Store previous state
 }
 
-// Run at startup
+///////////////// ARDUINO SETUP FUNCTION ///////////////////
+
+/**
+ * Arduino setup function - runs once at startup
+ * Initializes hardware, sets pin modes, configures interrupts,
+ * detects operation mode based on button states at startup,
+ * and initializes the OLED display
+ */
 void setup()
 {
+  // Initialize serial communication for debugging (if enabled)
   #ifdef DEBUG
     Serial.begin(9600);
   #endif
+  
+  // Reset gamepad to known state
   Gamepad.reset();
 
-  modeStr="Joystick / Wheel";
+  // Set default mode
+  modeStr = "Joystick / Wheel";
 
-  // Encoder
+  // Configure rotary encoder pins with internal pull-up resistors
   pinMode(pinA, INPUT_PULLUP);
   pinMode(pinB, INPUT_PULLUP);
-  // Init encoder reading
-  drv_proc();
-  // Attach interrupt to each pin of the encoder
+  
+  // Initialize encoder reading and attach interrupts
+  drv_proc();  // Get initial encoder state
   attachInterrupt(digitalPinToInterrupt(pinA), drv_proc, CHANGE);
   attachInterrupt(digitalPinToInterrupt(pinB), drv_proc, CHANGE);
 
-  // Initialize Button Pins
+  // Configure all button pins with internal pull-up resistors
+  // Buttons are active LOW (pressed = 0, released = 1)
   pinMode(Button0, INPUT_PULLUP);
   pinMode(Button1, INPUT_PULLUP);
   pinMode(Button2, INPUT_PULLUP);
@@ -172,68 +234,76 @@ void setup()
   pinMode(ButtonStart, INPUT_PULLUP);
   pinMode(ButtonSelect, INPUT_PULLUP);
 
-  // Enable mouse emulation
+  // MODE SELECTION: Check which button is held during startup to determine operation mode
+  
+  // Mouse Mode: Hold Button0 during startup
   if (!digitalRead(Button0)) {
     mouse_emu = !mouse_emu;
     gamepad_emu = !gamepad_emu;
-    Mouse.begin();
-    modeStr="Mouse Mode";
+    Mouse.begin();                    // Initialize USB mouse functionality
+    modeStr = "Mouse Mode";
   } 
-  // Enable paddle emulation
+  
+  // Paddle Mode: Hold Button1 during startup  
   if (!digitalRead(Button1)) {
     paddle_emu = !paddle_emu;
     gamepad_emu = !gamepad_emu;
-    //gp_serial = "MiSTer-S1 Spinner";
-    modeStr="Paddle Mode";
+    modeStr = "Paddle Mode";
   }
-  // Spinner only (AKA mr.Spinner mode)
+  
+  // Mr. Spinner Mode: Hold Button2 during startup
   if (!digitalRead(Button2)) {
-    // Announce the device as mr.Spinner (more explanations in the readme file)
     mr_spinner_emu = !mr_spinner_emu;
     gamepad_emu = !gamepad_emu;
-    gp_serial = "MiSTer-S1 Spinner";
-    modeStr="Mr. Spinner Mode";
+    gp_serial = "MiSTer-S1 Spinner";  // Change device ID for MiSTer compatibility
+    modeStr = "Mr. Spinner Mode";
   }
 
+  // Alternative Gamepad Mode: Hold Button3 during startup
   if (!digitalRead(Button3)) {
     gamepad_emu = !gamepad_emu;
-    gp_serial = "MiSTer-A1 Spinner";
+    gp_serial = "MiSTer-A1 Spinner";  // Alternative device ID
   }
 
+  // Initialize OLED display
   oled.begin();
-  oled.setBusClock(100000); // I2C auf 100 kHz setzen für mehr Stabilität
-  oled.clearBuffer();
-  drawDisplay();
+  oled.setBusClock(100000);           // Set I2C clock to 100kHz for stability
+  oled.clearBuffer();                 // Clear display buffer
+  drawDisplay();                      // Show initial mode information
 }
 
-// Main loop
+///////////////// MAIN PROGRAM LOOP ///////////////////
+
+/**
+ * Arduino main loop function - runs continuously
+ * Handles input processing, mode-specific behavior,
+ * sensitivity adjustments, and USB HID communication
+ */
 void loop()
 {
+  // Reset gamepad report structure to default values
+  rep.paddle = 0;     // Paddle position (0-255)
+  rep.spinner = 0;    // Spinner delta movement (-127 to +127)
+  rep.xAxis = 0;      // Analog X-axis value (-127 to +127)
+  rep.yAxis = 0;      // Analog Y-axis value (-127 to +127)
+  rep.hat = 8;        // D-pad neutral position (8 = center)
 
-     
-  //static GamepadReport rep = {}; // Struktur für aktuellen Zustand
-
-  // ---- Reset aller Werte zu Beginn ----
-  //memset(&rep, 0, sizeof(GamepadReport));
+  ///////////////// MOUSE MODE SENSITIVITY ADJUSTMENT ///////////////////
   
-
-  // Maus-Sensitivität per Button3 (--) und Button2 (++) anpassen
-  static uint32_t lastSensChange = 0;
-  uint32_t now = millis();
-  
+  // Timing variables for sensitivity changes to prevent rapid adjustments
   static uint32_t lastMouseIncChange = 0;
   static uint32_t lastMouseDecChange = 0;
-  const uint16_t mouseChangeDelay = 150;
+  const uint16_t mouseChangeDelay = 150;  // Minimum time between changes (ms)
 
   if (mouse_emu) {
     uint32_t now = millis();
   
-    // Erhöhen mit SELECT + R
+    // Increase mouse sensitivity: SELECT + R buttons
     if (!digitalRead(ButtonSelect) && !digitalRead(ButtonR)) {
       if (!mouseSensChangedInc && (now - lastMouseIncChange > mouseChangeDelay)) {
         if (mouse_sensitivity < 100) {
           mouse_sensitivity += 1;
-          drawDisplay();
+          drawDisplay();              // Update display with new value
         }
         mouseSensChangedInc = true;
         lastMouseIncChange = now;
@@ -242,12 +312,12 @@ void loop()
       mouseSensChangedInc = false;
     }
   
-    // Verringern mit SELECT + L
+    // Decrease mouse sensitivity: SELECT + L buttons
     if (!digitalRead(ButtonSelect) && !digitalRead(ButtonL)) {
       if (!mouseSensChangedDec && (now - lastMouseDecChange > mouseChangeDelay)) {
         if (mouse_sensitivity > 1) {
           mouse_sensitivity -= 1;
-          drawDisplay();
+          drawDisplay();              // Update display with new value
         }
         mouseSensChangedDec = true;
         lastMouseDecChange = now;
@@ -257,17 +327,20 @@ void loop()
     }
   }
 
+  ///////////////// MR. SPINNER MODE SENSITIVITY ADJUSTMENT ///////////////////
+  
   static uint32_t lastSpinnerIncChange = 0;
   static uint32_t lastSpinnerDecChange = 0;
-  const uint16_t spinnerChangeDelay = 150;
+  const uint16_t spinnerChangeDelay = 150;  // Minimum time between changes (ms)
   
   if (mr_spinner_emu) {
+    uint32_t now = millis();
       
-    // Erhöhen mit Button2 (weniger empfindlich)
+    // Increase spinner sensitivity (less sensitive): SELECT + R buttons
     if (!digitalRead(ButtonSelect) && !digitalRead(ButtonR)) {
       if (!wheelSensChangedInc && (now - lastSpinnerIncChange > spinnerChangeDelay)) {
         if (spinner_sensitivity < 100) {
-          spinner_sensitivity += 10;
+          spinner_sensitivity += 10;   // Larger increments for spinner mode
           drawDisplay();
         }
         wheelSensChangedInc = true;
@@ -277,11 +350,11 @@ void loop()
       wheelSensChangedInc = false;
     }
   
-    // Verringern mit Button3 (empfindlicher)
+    // Decrease spinner sensitivity (more sensitive): SELECT + L buttons
     if (!digitalRead(ButtonSelect) && !digitalRead(ButtonL)) {
       if (!wheelSensChangedDec && (now - lastSpinnerDecChange > spinnerChangeDelay)) {
         if (spinner_sensitivity > 1) {
-          spinner_sensitivity -= 10;
+          spinner_sensitivity -= 10;   // Larger decrements for spinner mode
           drawDisplay();
         }
         wheelSensChangedDec = true;
@@ -292,41 +365,42 @@ void loop()
     }
   }
 
-
- 
-  // Default Spinner/Paddle/HAT position;
-  rep.paddle = 0;
-  rep.spinner = 0;
-  rep.xAxis = 0;
-  rep.yAxis = 0;
-  rep.hat = 8; // Neutralposition
-
+  ///////////////// BUTTON STATE PROCESSING ///////////////////
   
-  // Buttons
+  // Button handling differs between operation modes
   if (mr_spinner_emu || paddle_emu) {
+    // In spinner/paddle modes, combine main buttons into single button
     rep.b0 = !digitalRead(Button0) || !digitalRead(Button1);
   } else {
+    // In gamepad mode, map each button individually
     rep.b0 = !digitalRead(Button0);
     rep.b1 = !digitalRead(Button1);
     rep.b2 = !digitalRead(Button2);
     rep.b3 = !digitalRead(Button3);  
   }
 
-  // spinner rotation
+  ///////////////// SPINNER ROTATION PROCESSING ///////////////////
+  
+  // Calculate spinner movement delta since last update
   static uint16_t prev = 0;
   int16_t val = ((int16_t)(drvpos - prev));
-  if(val>127) val = 127; else if(val<-127) val = -127;
-  rep.spinner = val;
-  prev += val;
+  
+  // Clamp movement to prevent overflow in USB HID report
+  if(val > 127) val = 127; 
+  else if(val < -127) val = -127;
+  
+  rep.spinner = val;    // Set spinner delta movement
+  prev += val;          // Update previous position tracker
 
-
+  ///////////////// PADDLE MODE SENSITIVITY ADJUSTMENT ///////////////////
+  
   static uint32_t lastPaddleChange = 0;
-  const uint16_t paddleChangeDelay = 150;
+  const uint16_t paddleChangeDelay = 150;  // Minimum time between changes (ms)
   
   if (paddle_emu) {
     uint32_t now = millis();
   
-    // Erhöhen mit SELECT + R
+    // Increase paddle sensitivity: SELECT + R buttons
     if (!digitalRead(ButtonSelect) && !digitalRead(ButtonR)) {
       if (!paddleSensChangedInc && (now - lastPaddleChange > paddleChangeDelay)) {
         if (paddle_sensitivity < 5.0f) {
@@ -543,36 +617,47 @@ Serial.println((sp_clamp * 255.0f) / (SP_MAX / paddle_sensitivity));
 }
 
 
+///////////////// OLED DISPLAY FUNCTION ///////////////////
+
+/**
+ * Updates the OLED display with current mode and sensitivity information
+ * Shows device title, current operation mode, and mode-specific settings
+ * Called whenever mode changes or sensitivity values are adjusted
+ */
 void drawDisplay() {
-  oled.clearBuffer();
-  oled.setFont(u8g2_font_sonicmania_te);
-  oled.drawStr(4, 14, "THE ARCADER");
-  oled.drawHLine(0, 18, 128);
-
-  oled.setFont(u8g2_font_helvB08_tf);
-
-  oled.drawStr(6, 32, ("MODE: "));
-  oled.setFont(u8g2_font_helvB08_tf);
-  oled.drawStr(9, 42, (modeStr).c_str());
+  oled.clearBuffer();                                    // Clear display buffer
   
-  oled.drawHLine(0, 46, 128);
-  // Bei bestimmten Modi Sensitivität anzeigen
+  // Draw title header
+  oled.setFont(u8g2_font_sonicmania_te);                // Large font for title
+  oled.drawStr(4, 14, "THE ARCADER");                   // Device title
+  oled.drawHLine(0, 18, 128);                           // Horizontal separator line
+
+  // Draw current mode information  
+  oled.setFont(u8g2_font_helvB08_tf);                   // Standard font for content
+  oled.drawStr(6, 32, "MODE: ");                        // Mode label
+  oled.drawStr(9, 42, (modeStr).c_str());               // Current mode string
+  
+  oled.drawHLine(0, 46, 128);                           // Another separator line
+  
+  // Display sensitivity settings based on current operation mode
   if (mr_spinner_emu) {
     char sensStr[20];
     sprintf(sensStr, "Spinner Speed: %d", spinner_sensitivity);
     oled.drawStr(6, 57, sensStr);
-  }else if (mouse_emu) {
+  } else if (mouse_emu) {
     char sensStr[20];
     sprintf(sensStr, "Mouse Speed: %d", mouse_sensitivity);
     oled.drawStr(6, 60, sensStr);
-  }else if (paddle_emu) {
+  } else if (paddle_emu) {
     char sensStr[20];
     sprintf(sensStr, "Paddle Speed: %d", (int)(paddle_sensitivity * 2));
     oled.drawStr(6, 60, sensStr);
   } else {   
+    // Default gamepad mode
     char sensStr[20];
     sprintf(sensStr, "Wheel Speed: %d", wheel_sensitivity);
     oled.drawStr(6, 60, sensStr);
-    }
-  oled.sendBuffer();
+  }
+  
+  oled.sendBuffer();                                     // Send buffer to display
 }
